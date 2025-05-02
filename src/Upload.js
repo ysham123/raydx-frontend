@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import normal1 from './assets/normal1.jpeg';
 import normal2 from './assets/normal2.jpeg';
@@ -15,54 +15,83 @@ const testImages = [
 function Upload() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false); // Add loading state
   const navigate = useNavigate();
+  const formRef = useRef(null);
+
+  // Use useEffect to submit the form when selectedFile changes
+  useEffect(() => {
+    if (selectedFile && loading) {
+      // Programmatically submit the form after selectedFile is set
+      const event = new Event('submit', { bubbles: true });
+      formRef.current.dispatchEvent(event);
+    }
+  }, [selectedFile, loading]);
 
   const handleFileChange = (event) => {
-    setSelectedFile(event.target.files[0]);
-    setError(null);
+    const file = event.target.files[0];
+    if (file) {
+      setSelectedFile(file);
+      setError(null);
+      setLoading(false); // Not loading from test image
+    } else {
+      setError('No file selected. Please choose an image to upload.');
+    }
   };
 
   const handleTestImage = async (imageSrc) => {
     try {
+      setLoading(true); // Set loading to true to indicate test image processing
+      setError(null);
       const response = await fetch(imageSrc);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch test image: ${response.statusText}`);
+      }
       const blob = await response.blob();
       const file = new File([blob], `test-image-${Date.now()}.jpeg`, { type: 'image/jpeg' });
-      setSelectedFile(file);
-      setError(null);
-      const event = new Event('submit', { bubbles: true });
-      document.querySelector('form').dispatchEvent(event);
+      setSelectedFile(file); // This will trigger useEffect to submit the form
     } catch (error) {
-      console.error('Error loading test image:', error);
+      setLoading(false);
+      console.error('Error loading test image:', error.message);
       setError('Failed to load test image. Please try again.');
     }
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (selectedFile) {
-      const formData = new FormData();
-      formData.append('file', selectedFile);
-
-      try {
-        const response = await fetch('https://raydx-backend.onrender.com/predict', {
-          method: 'POST',
-          body: formData,
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || 'Failed to get prediction');
-        }
-
-        const data = await response.json();
-        navigate('/result', { state: data });
-        setError(null);
-      } catch (error) {
-        console.error('Error uploading file:', error);
-        setError(error.message);
-      }
-    } else {
+    if (!selectedFile) {
       setError('No file selected. Please choose an image to upload.');
+      console.error('No file selected for upload');
+      setLoading(false);
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+
+    try {
+      console.log('Sending request to backend:', 'http://127.0.0.1:8000/predict');
+      const response = await fetch('https://raydx-backend.onrender.com/predict', {
+        method: 'POST',
+        body: formData,
+      });
+
+      console.log('Response status:', response.status);
+      if (!response.ok) {
+        const errorData = await response.json();
+        const errorMessage = errorData.error || 'Failed to get prediction';
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+      console.log('Received data from backend:', data);
+      navigate('/result', { state: data });
+      setError(null);
+    } catch (error) {
+      console.error('Error uploading file:', error.message);
+      setError(error.message);
+    } finally {
+      setLoading(false); // Reset loading state
     }
   };
 
@@ -72,7 +101,10 @@ function Upload() {
       {error && (
         <p className="text-red-500 text-center mb-4">{error}</p>
       )}
-      <form onSubmit={handleSubmit} className="flex flex-col items-center space-y-4">
+      {loading && (
+        <p className="text-blue-500 text-center mb-4">Processing test image...</p>
+      )}
+      <form ref={formRef} onSubmit={handleSubmit} className="flex flex-col items-center space-y-4">
         <input
           type="file"
           accept="image/*"
@@ -82,6 +114,7 @@ function Upload() {
         <button
           type="submit"
           className="bg-blue-600 text-white px-6 py-2 rounded-full font-semibold hover:bg-blue-700"
+          disabled={loading} // Disable button while loading
         >
           Upload
         </button>
@@ -94,8 +127,8 @@ function Upload() {
               <img
                 src={img.src}
                 alt={img.name}
-                className="w-32 h-32 object-cover rounded-lg shadow-md transition-transform duration-300 hover:scale-105 cursor-pointer"
-                onClick={() => handleTestImage(img.src)}
+                className={`w-32 h-32 object-cover rounded-lg shadow-md transition-transform duration-300 hover:scale-105 cursor-pointer ${loading ? 'opacity-50' : ''}`}
+                onClick={() => !loading && handleTestImage(img.src)} // Disable clicks while loading
               />
               <p className="mt-2 text-gray-600 font-medium">{img.name}</p>
             </div>
